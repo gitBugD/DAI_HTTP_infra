@@ -1,0 +1,12 @@
+version: "3.9"
+
+services:
+  web-app:
+    container_name: webserver
+    image: custom_nginx
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: always
+    ports:
+      - "8080:80"
