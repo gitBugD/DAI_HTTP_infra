@@ -1,12 +1,52 @@
 version: "3.9"
 
 services:
-  web-app:
-    container_name: webserver
-    image: custom_nginx
+  reverse_proxy:
+    image: "traefik:v2.10"
+    container_name: "traefik"
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web_app.address=:5000"
+      - "--entrypoints.pizza_api.address=:7000"
+    ports:
+      - "5000:5000"
+      - "7000:7000"
+      - "8080:8080"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+
+  web_app:
+    container_name: custom_nginx
+    image: webserver
     build:
-      context: .
+      context: ./static_site_content/
       dockerfile: Dockerfile
     restart: always
-    ports:
-      - "8080:80"
+    expose:
+      - "5000:80"
+    labels:
+      # Explicitly tell Traefik to expose this container
+      - "traefik.enable=true"
+      # The domain the service will respond to
+      - "traefik.http.routers.web_app.rule=Host(`localhost`)"
+      - "traefik.http.routers.web_app.entrypoints=web_app"
+      - "traefik.http.services.web_app.loadbalancer.server.port=80"
+
+  pizza_api:
+    container_name: pizza_api_service
+    image: pizza_api
+    build:
+      context: ./api/
+      dockerfile: Dockerfile
+    restart: always
+    expose:
+      - "7000:7000"
+    labels:
+      # Explicitly tell Traefik to expose this container
+      - "traefik.enable=true"
+      # The domain the service will respond to
+      - "traefik.http.routers.pizza_api.rule=(Host(`localhost`) && PathPrefix(`/api`))"
+      - "traefik.http.routers.pizza_api.entrypoints=pizza_api"
+      - "traefik.http.services.pizza_api.loadbalancer.server.port=7000"
