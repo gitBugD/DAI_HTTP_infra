@@ -90,7 +90,7 @@ ports: -> to set the open ports for the different services
 volumes:
 - "/var/run/docker.sock:/var/run/docker.sock:ro"
 
-I also needed to add some extra-parameters to each of he other services:
+I also needed to add some extra-parameters to each of the other services:
 - instead of "ports:..." now there is "expose:...", because the ports are already opened by the traefix service.
 - a new section "labels" is added with the following content:
   - "traefik.enable=true" -> to enable trafik for the service
@@ -112,5 +112,61 @@ Indeed, by intercepting requests, the reverse proxy protects the web server’s 
 In this way, the reverse proxy acts as an additional defense against security attacks: the attackers will only be able to target the reverse proxy, which will have tighter security and more resources to fend off a cyberattack.
 
 ## Step 5: Scalability and load balancing
+To start several instances of a server inside the docker-compose file, it's very simple. We need to:
+1) add deploy options with mode "replicated" and a fixed number of replicas
+2) remove the container name for that server, so that docker can create multiple instances giving them different names
+
+So, since we need to start several instances of our two servers, we repeat these steps twice.
+For both the webserver and the pizza_api service I want to add 5 replicas, so I add:
+deploy:
+  mode: replicated
+  replicas: 5
+
+Then I remove the container-name I had specified (I commented the lines).
+This is enough to start multiple instances when we run the command docker-compose.
+
+We can check that there are 5 replicas running in the dashboard of Traefik, under HTTP Services.
+Here we can see that the number of servers running is 5 for both the static web app and the api.
+
+Since I also want to be able to scale up and down (add/remove instances) my services, this is not enough.
+Indeed, to achieve this goal, I need an orchestrator. A simple one, already linked with Docker, is Docker Swarm.
+To deploy my services using Docker Swarm, I initialise docker swarm, running the command:
+
+docker swarm init
+
+After, I need to choose a name for my stack (I choose dai-lab-infra) and to run the following:
+
+docker stack deploy --compose-file docker-compose.yml dai-lab-infra
+
+This command will start, like before, the 5 replicas for each server that I demanded.
+But now, if I want to change the number of replicas, I can just use the scale function (for one service or both of them).
+
+To scale both the services: docker service scale dai-lab-infra_web_app=4 dai-lab-infra_pizza_api=6
+
+To stop and delete a container, we just need to specify the number of replicas equals to 0 or we can run:
+
+docker service rm <service_name>
+
+Note: to stop or delete the services through Docker Desktop will NOT work: once we exit one service, another one will be created and run to replace it.
+
 ## Step 6: Load balancing with round-robin and sticky sessions
+Since so far we used round-robin to distribute the load among the available servers, every time we connect to a server, the information of the previous session is lost.
+This is what we refer to as stateless.
+For my API, I would like the information of a past session (like a pizza that I created) to be available when I reconnect.
+This is possible if I also send the cookie previously sent to my client, to make the server recognize where the request come from.
+To do so, we can use sticky-sessions, which enable my API service to be stateful, so to "keep memory" of a previous state by asking the load balancer to direct my requests always to the same server.
+
+To demonstrate this, I connect to my pizza_api using Bruno and I create a new pizza.
+If then I try to get the newly created pizza, sometimes the server will return it, but most of the time it won't, since the new pizza is saved in the memory of a single server.
+
+Now I add the following lines to the Traefik section in my pizza_api service inside docker compose:
+- "traefik.http.services.pizza_api.loadbalancer.sticky.cookie=true"
+- "traefik.http.services.pizza_api.loadBalancer.sticky.cookie.name=sticky_pizza"
+
+I stop and rerun my services (as explained in previous step).
+I retry to create a new pizza with Bruno.
+Now, every time I try to run a GET on the newly created pizza, the server returns it.
+
+How to prove that that my load balancer can distribute HTTP requests in a round-robin fashion to the static server nodes?
+
 ## Step 7: Securing Traefik with HTTPS
