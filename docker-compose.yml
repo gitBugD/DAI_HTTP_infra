@@ -3,7 +3,7 @@ version: "3.9"
 services:
   reverse_proxy:
     image: "traefik:v2.10"
-    container_name: "traefik"
+    #container_name: "traefik"
     command:
       - "--api.insecure=true"
       - "--providers.docker=true"
@@ -18,11 +18,14 @@ services:
       - "/var/run/docker.sock:/var/run/docker.sock:ro"
 
   web_app:
-    container_name: custom_nginx
+    #container_name: custom_nginx
     image: webserver
     build:
       context: ./static_site_content/
       dockerfile: Dockerfile
+    deploy:
+      mode: replicated
+      replicas: 5
     restart: always
     expose:
       - "5000:80"
@@ -35,12 +38,16 @@ services:
       - "traefik.http.services.web_app.loadbalancer.server.port=80"
 
   pizza_api:
-    container_name: pizza_api_service
+    #container_name: pizza_api_service
     image: pizza_api
     build:
       context: ./api/
       dockerfile: Dockerfile
     restart: always
+    deploy:
+      mode: replicated
+      replicas:
+        5
     expose:
       - "7000:7000"
     labels:
@@ -50,3 +57,5 @@ services:
       - "traefik.http.routers.pizza_api.rule=(Host(`localhost`) && PathPrefix(`/api`))"
       - "traefik.http.routers.pizza_api.entrypoints=pizza_api"
       - "traefik.http.services.pizza_api.loadbalancer.server.port=7000"
+      - "traefik.http.services.pizza_api.loadbalancer.sticky.cookie=true"
+      - "traefik.http.services.pizza_api.loadBalancer.sticky.cookie.name=sticky_pizza"
