@@ -2,60 +2,64 @@ version: "3.9"
 
 services:
   reverse_proxy:
-    image: "traefik:v2.10"
     #container_name: "traefik"
-    command:
-      - "--api.insecure=true"
-      - "--providers.docker=true"
-      - "--providers.docker.exposedbydefault=false"
-      - "--entrypoints.web_app.address=:5000"
-      - "--entrypoints.pizza_api.address=:7000"
+    #image: "traefik:v2.10"
+    image: my_treafik
+    build:
+      context: ./traefik/
+    #command:
+    #  - "--api.insecure=true"
+    #  - "--providers.docker=true"
     ports:
-      - "5000:5000"
-      - "7000:7000"
+      - "80:80"
+      - "443:443"
       - "8080:8080"
     volumes:
       - "/var/run/docker.sock:/var/run/docker.sock:ro"
-
-  web_app:
-    #container_name: custom_nginx
-    image: webserver
-    build:
-      context: ./static_site_content/
-      dockerfile: Dockerfile
-    deploy:
-      mode: replicated
-      replicas: 5
-    restart: always
-    expose:
-      - "5000:80"
-    labels:
-      # Explicitly tell Traefik to expose this container
-      - "traefik.enable=true"
-      # The domain the service will respond to
-      - "traefik.http.routers.web_app.rule=Host(`localhost`)"
-      - "traefik.http.routers.web_app.entrypoints=web_app"
-      - "traefik.http.services.web_app.loadbalancer.server.port=80"
 
   pizza_api:
     #container_name: pizza_api_service
     image: pizza_api
     build:
       context: ./api/
-      dockerfile: Dockerfile
     restart: always
     deploy:
       mode: replicated
-      replicas:
-        5
+      replicas: 3
     expose:
-      - "7000:7000"
+      - "7000"
     labels:
       # Explicitly tell Traefik to expose this container
       - "traefik.enable=true"
       # The domain the service will respond to
       - "traefik.http.routers.pizza_api.rule=(Host(`localhost`) && PathPrefix(`/api`))"
-      - "traefik.http.routers.pizza_api.entrypoints=pizza_api"
-      - "traefik.http.services.pizza_api.loadbalancer.server.port=7000"
+      # To add load balancing for multiple services
+      #- "traefik.http.services.pizza_api.loadbalancer.server.port=7000"
+      # To make sticky sessions possible
       - "traefik.http.services.pizza_api.loadbalancer.sticky.cookie=true"
       - "traefik.http.services.pizza_api.loadBalancer.sticky.cookie.name=sticky_pizza"
+      # To add https
+      - "traefik.http.routers.pizza_api.entrypoints=web,websecure"
+      - "traefik.http.routers.pizza_api.tls=true"
+
+  web_app:
+    #container_name: custom_nginx
+    image: webserver
+    build:
+      context: ./static_site_content/
+    deploy:
+      mode: replicated
+      replicas: 3
+    restart: always
+    expose:
+      - "80"
+    labels:
+      # Explicitly tell Traefik to expose this container
+      - "traefik.enable=true"
+      # The domain the service will respond to
+      - "traefik.http.routers.web_app.rule=Host(`localhost`)"
+      # To add load balancing for multiple services
+      #- "traefik.http.services.web_app.loadbalancer.server.port=80"
+      # To add https
+      - "traefik.http.routers.web_app.entrypoints=web,websecure"
+      - "traefik.http.routers.web_app.tls=true"

@@ -80,27 +80,24 @@ container_name: "traefik" -> the name I want to give to my container
 command:
 - "--api.insecure=true" -> to be able to expose other ports rather than only port 80
 - "--providers.docker=true" -> to set docker as provider
-- "--providers.docker.exposedbydefault=false" -> to avoid to expose all services by default
-- "--entrypoints.web_app.address=:5000" -> to set the port to access the web_app entrypoint, which is for the static website
-- "--entrypoints.pizza_api.address=:7000" -> to set the port to access the pizza_api entrypoint
-ports: -> to set the open ports for the different services
-- "5000:5000"
-- "7000:7000"
+ports: -> to set the open ports
+- "80:80"
 - "8080:8080" -> this is the port we need to open to see the traefik dashboard
 volumes:
 - "/var/run/docker.sock:/var/run/docker.sock:ro"
 
 I also needed to add some extra-parameters to each of the other services:
 - instead of "ports:..." now there is "expose:...", because the ports are already opened by the traefix service.
+- since in "expose" only the container port is needed (not the local one) there is "expose: 80" for the web app and "expose: 7000" for the api service.
 - a new section "labels" is added with the following content:
   - "traefik.enable=true" -> to enable trafik for the service
   - "traefik.http.routers.<route_name>.rule=Host(`localhost`)" -> the domain the service responds to
-  - "traefik.http.routers.<route_name>.entrypoints=<entrypoint_name>" -> the entrypoint for the service (web_app or pizza_api, as specified in the reverse_proxy service)
-  - "traefik.http.services.<service_name>.loadbalancer.server.port=<server_port>" -> the port the server listens to for the service (80 for nginx, 7000 for the api)
-
+ 
 Now, we can run docker compose up again to create the new infrastructure from scratch.
 
-To access the dashboard of Traefik, since we set --api.insecure=true in the docker compose file for its service, we can simply visit localhost:8080/dashboard/#/. 
+To access the static website, we can simply type localhost, and to access the api service, localhost/api.
+
+To access the dashboard of Traefik, since we set --api.insecure=true in the docker compose file for its service, we can visit localhost:8080/dashboard/#/. 
 There we can see much useful information:
 - our defined entrypoints, with their respective ports
 - the current active routes handled by Traefik for HTTP (the only one in our case), TCP, UDP
@@ -117,16 +114,16 @@ To start several instances of a server inside the docker-compose file, it's very
 2) remove the container name for that server, so that docker can create multiple instances giving them different names
 
 So, since we need to start several instances of our two servers, we repeat these steps twice.
-For both the webserver and the pizza_api service I want to add 5 replicas, so I add:
+For both the webserver and the pizza_api service I want to add 3 replicas, so I add:
 deploy:
   mode: replicated
-  replicas: 5
+  replicas: 3
 
 Then I remove the container-name I had specified (I commented the lines).
 This is enough to start multiple instances when we run the command docker-compose.
 
-We can check that there are 5 replicas running in the dashboard of Traefik, under HTTP Services.
-Here we can see that the number of servers running is 5 for both the static web app and the api.
+We can check that there are 3 replicas running in the dashboard of Traefik, under HTTP Services.
+Here we can see that the number of servers running is 3 for both the static web app and the api.
 
 Since I also want to be able to scale up and down (add/remove instances) my services, this is not enough.
 Indeed, to achieve this goal, I need an orchestrator. A simple one, already linked with Docker, is Docker Swarm.
@@ -138,12 +135,16 @@ After, I need to choose a name for my stack (I choose dai-lab-infra) and to run 
 
 docker stack deploy --compose-file docker-compose.yml dai-lab-infra
 
-This command will start, like before, the 5 replicas for each server that I demanded.
+This command will start, like before, the 3 replicas for each server that I demanded.
 But now, if I want to change the number of replicas, I can just use the scale function (for one service or both of them).
 
-To scale both the services: docker service scale dai-lab-infra_web_app=4 dai-lab-infra_pizza_api=6
+To scale both the services: docker service scale dai-lab-infra_web_app=4 dai-lab-infra_pizza_api=5
 
-To stop and delete a container, we just need to specify the number of replicas equals to 0 or we can run:
+Starting the services with docker swarm, we get two messages:
+- build and restart are unsupported options
+- exposing ports is unnecessary (services on the same network can access each other's containers on any port), so we could remove the "expose" option.
+
+To stop and delete a container, we just need to specify the number of replicas equals to 0, or we can run:
 
 docker service rm <service_name>
 
@@ -153,7 +154,7 @@ Note: to stop or delete the services through Docker Desktop will NOT work: once 
 Since so far we used round-robin to distribute the load among the available servers, every time we connect to a server, the information of the previous session is lost.
 This is what we refer to as stateless.
 For my API, I would like the information of a past session (like a pizza that I created) to be available when I reconnect.
-This is possible if I also send the cookie previously sent to my client, to make the server recognize where the request come from.
+This is possible if I also send the cookie previously sent to my client, to make the server recognize where the request comes from.
 To do so, we can use sticky-sessions, which enable my API service to be stateful, so to "keep memory" of a previous state by asking the load balancer to direct my requests always to the same server.
 
 To demonstrate this, I connect to my pizza_api using Bruno and I create a new pizza.
@@ -167,6 +168,47 @@ I stop and rerun my services (as explained in previous step).
 I retry to create a new pizza with Bruno.
 Now, every time I try to run a GET on the newly created pizza, the server returns it.
 
-How to prove that that my load balancer can distribute HTTP requests in a round-robin fashion to the static server nodes?
+?????How to prove that my load balancer can distribute HTTP requests in a round-robin fashion to the static server nodes?
 
 ## Step 7: Securing Traefik with HTTPS
+I downloaded openssl and I created a new environment variable for using it in the command line simply typing "openssl".
+Then I run the following command to create 2 files, the certificate and the key:
+
+openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -sha256 -days 366 -nodes -subj "/CN=localhost"
+
+They were successfully created in a folder that I added to the gitignore file, to hide it from GitHub.
+
+Then, to be able to specify a location to look for these files, I added a traefik configuration file. 
+It contains the following:
+
+providers:
+  docker: {}
+
+entryPoints:
+  web:
+    address: ":80"
+  
+  websecure:
+    address: ":443"
+
+api:
+  dashboard: true
+  insecure: true
+
+tls:
+  certificates:
+    - certFile: /etc/traefik/certificates/cert.pem
+    keyFile: /etc/traefik/certificates/key.pem
+
+After this, I removed the "command" options from the traefik service configuration inside the docker compose file and I added the port 443.
+
+Since traefik was not able to open the trafik.yaml file when I was simply adding it to the volumes to mount ("operation not permitted" error, probably a problem caused by the mapping of a Windows file to a Linux file, that was breaking file permissions), I created a Dockerfile with the image for my traefik service, always based on the original traefik image.
+In this Dockerfile, I added two commands to copy the needed files:
+COPY ./traefik.yaml /etc/traefik/traefik.yaml -> for the traefik configuration
+COPY ./certificates /etc/traefik/certificates -> for the https certificate and key
+
+To activate the HTTPS entrypoint for the servers, I added two lines to the labels of web_app and pizza_api:
+- "traefik.http.routers.<service_name>.entrypoints=web,websecure" -> to be able to access the services with the entrypoint websecure, which corresponds to https, as specified in the traefik configuration file.
+- "traefik.http.routers.<service_name>.tls=true" -> to ask the service to use tls (it won't be accessible without https)
+
+Now, after building and running the docker compose again, it is possible to access both the static and the dynamic servers through HTTPS.

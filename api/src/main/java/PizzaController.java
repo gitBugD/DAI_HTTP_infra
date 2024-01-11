@@ -15,8 +15,13 @@ class PizzaController {
         pizzas.put(++lastId, new Pizza("Sfida", new ArrayList<>(List.of("pomodoro", "mozzarella", "gorgonzola", "cipolle"))));
     }
     public void getOne(Context ctx) {
-        int id = Integer.parseInt(ctx.pathParam("id"));
-        ctx.json(pizzas.get(id));
+        try {
+            int id = Integer.parseInt(ctx.pathParam("id"));
+            ctx.json(pizzas.get(id));
+        }
+        catch (Exception ex){
+            ctx.status(404);
+        }
     }
 
     public void getAll(Context ctx) {
