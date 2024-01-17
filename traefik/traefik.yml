@@ -16,3 +16,6 @@ tls:
   certificates:
     - certFile: /etc/traefik/certificates/cert.pem
       keyFile: /etc/traefik/certificates/key.pem
+
+accessLog:
+  filePath: "/path/to/access.log"
